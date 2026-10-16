@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ARRC Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f7fb; --panel:rgba(255,255,255,.86); --line:rgba(15,76,129,.14); --ink:#0f1c2e; --muted:#5b6b80;
+  --cyan:#0b7fab; --cyan2:#0ea5c6; --amber:#d97706; --red:#dc2626; --green:#15803d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:radial-gradient(1200px 700px at 50% 38%,#e3f1fb 0%,var(--bg) 62%);color:var(--ink);font:15px/1.45 "Space Grotesk",system-ui,sans-serif;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:
+  linear-gradient(transparent 0 calc(100% - 1px),rgba(11,127,171,.06) 0) 0 0/100% 32px,
+  linear-gradient(90deg,transparent 0 calc(100% - 1px),rgba(11,127,171,.06) 0) 0 0/32px 100%}
+.wrap{position:relative;max-width:1280px;margin:0 auto;padding:20px 16px 32px;display:grid;gap:16px;grid-template-columns:300px 1fr 320px;grid-template-areas:"left core right"}
+@media (max-width:1100px){.wrap{grid-template-columns:1fr;grid-template-areas:"core" "left" "right"}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;backdrop-filter:blur(6px);box-shadow:0 6px 24px rgba(15,28,46,.06)}
+.label{font:600 11px/1 "JetBrains Mono",monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.left{grid-area:left;display:flex;flex-direction:column;gap:16px}
+.right{grid-area:right;display:flex;flex-direction:column;gap:16px;min-height:0}
+.core{grid-area:core;display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:6px}
+
+h1{margin:0;font-size:28px;letter-spacing:.32em;font-weight:700;text-align:center}
+h1 span{color:var(--cyan)}
+.tag{color:var(--muted);text-align:center;margin-top:4px;font-size:13px}
+
+/* reactor */
+.reactor{position:relative;width:min(380px,82vw);aspect-ratio:1}
+.reactor svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.spin{transform-origin:50% 50%;animation:spin 18s linear infinite}
+.spin.r{animation-direction:reverse;animation-duration:26s}
+.spin.f{animation-duration:6s}
+@keyframes spin{to{transform:rotate(360deg)}}
+.glow{filter:drop-shadow(0 0 4px rgba(11,127,171,.35))}
+.center{position:absolute;inset:28%;border-radius:50%;display:grid;place-items:center;text-align:center;
+  background:radial-gradient(circle,rgba(14,165,198,.20),rgba(14,165,198,.04) 62%,transparent 70%);transition:background .4s}
+.center .state{font:600 12px "JetBrains Mono",monospace;letter-spacing:.2em;color:var(--cyan)}
+.center .big{font-size:20px;font-weight:700;margin-top:4px;max-width:150px;word-break:break-word}
+.reactor.fire .center{background:radial-gradient(circle,rgba(255,181,71,.45),rgba(255,181,71,.06) 62%,transparent 70%)}
+.reactor.fire .center .state{color:var(--amber)}
+.reactor.deny .center{background:radial-gradient(circle,rgba(255,93,108,.45),rgba(255,93,108,.06) 62%,transparent 70%)}
+.reactor.deny .center .state{color:var(--red)}
+.reactor.fire .spin{animation-duration:2s}
+.reactor.fire .spin.r{animation-duration:3s}
+
+.now{width:100%;max-width:640px;text-align:center}
+.now .cmd{font-size:22px;font-weight:500;min-height:32px}
+.now .cmd q{color:var(--cyan)}
+.now .res{color:var(--muted);margin-top:6px;min-height:22px}
+
+.call{font-size:13px;color:var(--muted)}
+.call b{display:block;font-size:26px;color:var(--ink);letter-spacing:.04em;margin-top:6px;font-family:"JetBrains Mono",monospace}
+.call .hint{margin-top:10px;font-size:13px}
+.chips{display:flex;flex-direction:column;gap:8px}
+.chip{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.9)}
+.chip i{font-style:normal;font:600 12px "JetBrains Mono",monospace}
+.ok{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;margin-right:6px;box-shadow:0 0 6px currentColor}
+
+.caps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.cap{display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:rgba(255,255,255,.9);transition:all .3s}
+.cap .ic{width:22px;text-align:center}
+.cap.hot{border-color:var(--amber);background:rgba(255,181,71,.12);box-shadow:0 0 18px rgba(255,181,71,.25)}
+
+.feed{display:flex;flex-direction:column;gap:8px;max-height:58vh;overflow:auto;padding-right:2px}
+.item{border:1px solid var(--line);border-left:3px solid var(--cyan2);border-radius:10px;padding:9px 11px;background:rgba(255,255,255,.9)}
+.item.refused{border-left-color:var(--red)}
+.item.new{animation:flash 1.4s ease-out}
+@keyframes flash{from{background:rgba(14,165,198,.16)}}
+.item .top{display:flex;justify-content:space-between;gap:8px;font:12px "JetBrains Mono",monospace;color:var(--muted)}
+.item .act{color:var(--cyan)} .item.refused .act{color:var(--red)}
+.item .in{margin-top:4px} .item .out{color:var(--muted);font-size:13px;margin-top:2px}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:24px 0}
+.samples{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.samples span{color:var(--ink)}
+@media (prefers-reduced-motion:reduce){.spin,.item.new{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="left">
+    <div class="panel call">
+      <div class="label">Call ARRC</div>
+      Dial from your phone
+      <b id="phone">—</b>
+      <div class="hint">Speak in Hindi, English, Telugu or any mix. Powered by Sarvam: Saaras listens, Sarvam-105B decides, Bulbul speaks.</div>
+    </div>
+    <div class="panel">
+      <div class="label">System</div>
+      <div class="chips">
+        <div class="chip"><span>Laptop link</span><i id="link" class="ok"><span class="dot"></span>ONLINE</i></div>
+        <div class="chip"><span>Owner lock</span><i id="lock">—</i></div>
+        <div class="chip"><span>Actions today</span><i id="count">0</i></div>
+        <div class="chip"><span>Refused callers</span><i id="refused">0</i></div>
+      </div>
+    </div>
+    <div class="panel samples">
+      <div class="label">Try saying</div>
+      <div><span>“YouTube pe Arijit Singh chalao”</span></div>
+      <div><span>“Work mode on karo”</span></div>
+      <div><span>“5 minute ka timer lagao chai ke liye”</span></div>
+      <div><span>“Laptop se bolo, hello judges”</span></div>
+      <div><span>“Take a screenshot”</span></div>
+      <div><span>“Volume kam karo”</span></div>
+    </div>
+  </aside>
+
+  <main class="core">
+    <div>
+      <h1>A<span>.</span>R<span>.</span>R<span>.</span>C</h1>
+      <div class="tag">Your laptop, on a phone call. In your language.</div>
+    </div>
+    <div class="reactor" id="reactor" aria-hidden="true">
+      <svg viewBox="0 0 200 200">
+        <g class="spin glow"><circle cx="100" cy="100" r="96" fill="none" stroke="#0b7fab" stroke-opacity=".55" stroke-width="1" stroke-dasharray="2 6"/></g>
+        <g class="spin r"><circle cx="100" cy="100" r="86" fill="none" stroke="#0ea5c6" stroke-opacity=".35" stroke-width="6" stroke-dasharray="40 14"/></g>
+        <g class="spin f glow"><circle cx="100" cy="100" r="74" fill="none" stroke="#0b7fab" stroke-width="1.5" stroke-dasharray="90 30 20 30"/></g>
+        <g class="spin"><circle cx="100" cy="100" r="64" fill="none" stroke="#0b7fab" stroke-opacity=".25" stroke-width="10" stroke-dasharray="3 5"/></g>
+      </svg>
+      <div class="center"><div><div class="state" id="state">STANDBY</div><div class="big" id="big">Ready</div></div></div>
+    </div>
+    <div class="now panel">
+      <div class="label">Last command</div>
+      <div class="cmd" id="cmd">Waiting for your call…</div>
+      <div class="res" id="res"></div>
+    </div>
+    <div class="panel" style="width:100%;max-width:640px">
+      <div class="label">Capabilities</div>
+      <div class="caps" id="caps"></div>
+    </div>
+  </main>
+
+  <aside class="right">
+    <div class="panel" style="display:flex;flex-direction:column;min-height:0">
+      <div class="label">Live activity</div>
+      <div class="feed" id="feed"><div class="empty">No actions yet. Call the number.</div></div>
+    </div>
+  </aside>
+</div>
+<script>
+const CAPS = {
+  open_website:['🌐','Open any website'], web_search:['🔎','Google search'], play_youtube:['▶️','Play on YouTube'],
+  open_app:['🗂️','Open apps'], media_control:['🎚️','Music and volume'], run_routine:['⚡','Work / study modes'],
+  set_timer:['⏱️','Timers that talk'], speak_on_laptop:['🔊','Laptop speaks'], take_screenshot:['📸','Screenshots'],
+  draft_email:['✉️','Draft emails'], directions:['🧭','Directions'], weather:['⛅','Weather'],
+  take_note:['📝','Take notes'], read_notes:['📖','Read notes'], show_notes:['🗒️','Show notes'],
+  system_status:['🔋','Battery and time'], lock_screen:['🔒','Lock laptop'],
+};
+const NICE = Object.fromEntries(Object.entries(CAPS).map(([k,v])=>[k,v[1]]));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $ = id => document.getElementById(id);
+let seen = null, idle;
+
+fetch('/status').then(r=>r.json()).then(s=>{
+  $('phone').textContent = s.phone || 'Your Sarvam number';
+  $('lock').innerHTML = s.lock ? `<span class="ok"><span class="dot"></span>ON · ${esc(s.owner)}</span>` : '<span class="warn"><span class="dot"></span>OFF</span>';
+  $('caps').innerHTML = s.actions.filter(a=>CAPS[a]).map(a=>`<div class="cap" data-a="${a}"><span class="ic">${CAPS[a][0]}</span>${esc(CAPS[a][1])}</div>`).join('');
+}).catch(()=>{});
+
+function pulse(e){
+  const r = $('reactor');
+  r.classList.remove('fire','deny'); void r.offsetWidth;
+  r.classList.add(e.refused ? 'deny' : 'fire');
+  $('state').textContent = e.refused ? 'REFUSED' : 'EXECUTING';
+  $('big').textContent = e.refused ? 'Not owner' : (NICE[e.action] || e.action);
+  $('cmd').innerHTML = e.input && e.input !== 'none' ? `<q>${esc(e.input)}</q>` : esc(NICE[e.action] || e.action);
+  $('res').textContent = e.result || '';
+  document.querySelectorAll('.cap').forEach(c=>c.classList.toggle('hot', c.dataset.a === e.action));
+  clearTimeout(idle);
+  idle = setTimeout(()=>{ r.classList.remove('fire','deny'); $('state').textContent='STANDBY'; $('big').textContent='Ready';
+    document.querySelectorAll('.cap.hot').forEach(c=>c.classList.remove('hot')); }, 6000);
+}
+
+async function tick(){
+  try{
+    const a = await (await fetch('/activity')).json();
+    const key = JSON.stringify(a[0] || null);
+    if (key === seen) return;
+    const first = seen === null; seen = key;
+    $('count').textContent = a.filter(e=>!e.refused).length;
+    $('refused').textContent = a.filter(e=>e.refused).length;
+    $('feed').innerHTML = a.length ? a.map((e,i)=>`<div class="item ${e.refused?'refused':''} ${!first&&i===0?'new':''}">
+      <div class="top"><span class="act">${esc(e.action)}</span><span>${e.caller?esc(e.caller)+' · ':''}${esc(e.at)}</span></div>
+      ${e.input && e.input!=='none' ? `<div class="in">“${esc(e.input)}”</div>` : ''}<div class="out">${esc(e.result)}</div></div>`).join('')
+      : '<div class="empty">No actions yet. Call the number.</div>';
+    if (!first && a[0]) pulse(a[0]);
+    $('link').innerHTML = '<span class="dot"></span>ONLINE'; $('link').className = 'ok';
+  }catch{ $('link').innerHTML = '<span class="dot"></span>OFFLINE'; $('link').className = 'bad'; }
+}
+setInterval(tick, 700); tick();
+</script>
+</body>
+</html>
