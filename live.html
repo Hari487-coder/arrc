@@ -78,6 +78,20 @@ h1 span{color:var(--cyan)}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:24px 0}
 .samples{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
 .samples span{color:var(--ink)}
+.watch{display:flex;flex-direction:column;gap:10px}
+.dls{display:flex;flex-direction:column;gap:8px}
+.dl{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:rgba(255,255,255,.9);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.dl b{display:block;font-weight:600}
+.dl small{color:var(--muted);font:12px "JetBrains Mono",monospace}
+.dl.soon{border-color:var(--amber);background:rgba(217,119,6,.08)}
+.dl.late{border-color:var(--red);background:rgba(220,38,38,.07)}
+.dl button,.add button,.ghostbtn{font:inherit;font-size:13px;border-radius:8px;cursor:pointer;padding:7px 10px}
+.dl button{border:1px solid var(--line);background:#fff;color:var(--ink)}
+.add{display:flex;flex-direction:column;gap:6px}
+.add input{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+.add button{border:0;background:var(--cyan);color:#fff;font-weight:600}
+.ghostbtn{border:1px solid var(--cyan);background:#fff;color:var(--cyan);font-weight:600}
+.watchmsg{font-size:13px;color:var(--muted);min-height:18px}
 @media (prefers-reduced-motion:reduce){.spin,.item.new{animation:none}}
 </style>
 </head>
@@ -101,7 +115,10 @@ h1 span{color:var(--cyan)}
     </div>
     <div class="panel samples">
       <div class="label">Try saying</div>
-      <div><span>“YouTube pe Arijit Singh chalao”</span></div>
+      <div><span>“Mera EM5120 assignment kholo”</span></div>
+      <div><span>“25 minute focus session for my assignment”</span></div>
+      <div><span>“Remind me, DBMS project due tomorrow 5 pm”</span></div>
+      <div><span>“YouTube pe Arijit Singh ke gaane chalao”</span></div>
       <div><span>“Work mode on karo”</span></div>
       <div><span>“5 minute ka timer lagao chai ke liye”</span></div>
       <div><span>“Laptop se bolo, hello judges”</span></div>
@@ -136,6 +153,18 @@ h1 span{color:var(--cyan)}
   </main>
 
   <aside class="right">
+    <div class="panel watch">
+      <div class="label">ARRC is watching</div>
+      <div class="chip"><span>Urgent calls to you</span><i id="outbound">—</i></div>
+      <div id="dls" class="dls"><div class="empty">No deadlines yet.</div></div>
+      <form id="addDl" class="add">
+        <input id="dlTitle" placeholder="What is due? e.g. DBMS project" required>
+        <input id="dlWhen" placeholder="When? e.g. tomorrow 5 pm, in 2 minutes" required>
+        <button type="submit">Add deadline</button>
+      </form>
+      <button id="testCall" class="ghostbtn" type="button">📞 Test urgent call</button>
+      <div id="watchMsg" class="watchmsg"></div>
+    </div>
     <div class="panel" style="display:flex;flex-direction:column;min-height:0">
       <div class="label">Live activity</div>
       <div class="feed" id="feed"><div class="empty">No actions yet. Call the number.</div></div>
@@ -150,6 +179,9 @@ const CAPS = {
   draft_email:['✉️','Draft emails'], directions:['🧭','Directions'], weather:['⛅','Weather'],
   take_note:['📝','Take notes'], read_notes:['📖','Read notes'], show_notes:['🗒️','Show notes'],
   system_status:['🔋','Battery and time'], lock_screen:['🔒','Lock laptop'],
+  find_file:['📂','Find and open any file'], focus_session:['🎯','Focus sessions'],
+  add_deadline:['⏰','Deadline calls'], list_deadlines:['📋','What is due'], finish_deadline:['✅','Mark submitted'],
+  call_owner:['📞','ARRC calls you'],
 };
 const NICE = Object.fromEntries(Object.entries(CAPS).map(([k,v])=>[k,v[1]]));
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -193,6 +225,22 @@ async function tick(){
   }catch{ $('link').innerHTML = '<span class="dot"></span>OFFLINE'; $('link').className = 'bad'; }
 }
 setInterval(tick, 700); tick();
+
+const left = m => m < 0 ? 'overdue' : m < 60 ? `${Math.round(m)} min left` : m < 2880 ? `${Math.round(m/60)} h left` : `${Math.round(m/1440)} days left`;
+async function watch(){
+  try{
+    const s = await (await fetch('/monitor')).json();
+    $('outbound').innerHTML = s.configured ? '<span class="ok"><span class="dot"></span>READY</span>' : '<span class="warn"><span class="dot"></span>DRY RUN</span>';
+    $('dls').innerHTML = s.deadlines.length ? s.deadlines.map(d=>`<div class="dl ${d.minutesLeft<0?'late':d.minutesLeft<180?'soon':''}">
+      <div><b>${esc(d.title)}</b><small>${new Date(d.due).toLocaleString('en-IN',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})} · ${left(d.minutesLeft)}</small></div>
+      <button data-id="${esc(d.id)}">Submitted</button></div>`).join('') : '<div class="empty">No deadlines yet. Say “remind me…” on a call.</div>';
+  }catch{}
+}
+async function post(path, body){ const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); return r.json(); }
+$('dls').addEventListener('click', async e => { const id = e.target.dataset?.id; if (!id) return; $('watchMsg').textContent = (await post('/monitor/done',{id})).result; watch(); });
+$('addDl').addEventListener('submit', async e => { e.preventDefault(); const r = await post('/monitor/add',{title:$('dlTitle').value, when:$('dlWhen').value}); $('watchMsg').textContent = r.result; if (!/couldn|passed|Tell me/.test(r.result)) { $('dlTitle').value=''; $('dlWhen').value=''; } watch(); });
+$('testCall').addEventListener('click', async () => { $('watchMsg').textContent = 'Calling your phone…'; const r = await post('/monitor/test-call'); $('watchMsg').textContent = r.ok ? 'Calling you now. Pick up!' : r.dryRun ? 'Dry run: add the Sarvam outbound keys to .env to place real calls.' : `Call failed (${r.status || r.error}).`; });
+setInterval(watch, 5000); watch();
 </script>
 </body>
 </html>

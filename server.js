@@ -9,6 +9,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { findFiles, describe, buildIndex } from './files.js';
+import { createMonitor } from './monitor.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 for (const line of (fs.existsSync(path.join(ROOT, '.env')) ? fs.readFileSync(path.join(ROOT, '.env'), 'utf8') : '').split(/\r?\n/)) {
@@ -72,6 +74,15 @@ const ROUTINES = {
   news: { say: 'Opening today\'s top news.', urls: ['https://news.google.com/home?hl=en-IN&gl=IN&ceid=IN:en'], apps: [] },
   demo: { say: 'Demo mode. Opening Sarvam and the Jarvis console.', urls: ['https://www.sarvam.ai', 'http://localhost:3710'], apps: [] },
 };
+
+async function readBattery() {
+  const raw = await ps('$b=Get-CimInstance Win32_Battery; if($b){"$($b.EstimatedChargeRemaining)|$($b.BatteryStatus)"}else{"none"}');
+  if (!raw || raw === 'none') return null;
+  const [pct, st] = raw.split('|');
+  return { pct: Number(pct), charging: st === '2' || st === '6' || st === '7' || st === '8' || st === '9' };
+}
+const monitor = createMonitor({ root: ROOT, env: process.env, record: (e) => record(e), battery: readBattery });
+const FOCUS_MUSIC = 'https://www.youtube.com/watch?v=jfKfPfyJRdk';
 
 const SITES = {
   youtube: 'https://www.youtube.com', gmail: 'https://mail.google.com', google: 'https://www.google.com',
@@ -237,8 +248,45 @@ const ACTIONS = {
     for (const u of r.urls) { await openUrl(u); await sleep(300); }
     return r.say;
   },
+
+  // ----- the two headline tasks -----
+  async find_file({ input }) {
+    const q = clean(input);
+    if (!q || norm(q) === 'none') return 'Which file should I look for?';
+    const hits = findFiles(q, 3);
+    if (!hits.length) return `I couldn't find a file matching ${q} on your Desktop, Documents, Downloads or OneDrive.`;
+    const best = describe(hits[0]);
+    await run('explorer.exe', [hits[0].full]); // opens with its default app; only document/media types are indexed
+    const others = hits.length > 1 ? ` I also found ${hits.length - 1} similar file${hits.length > 2 ? 's' : ''}, ask if it's not the right one.` : '';
+    return `Opened ${best.file} from ${best.where}, last edited ${best.when}.${others}`;
+  },
+  async focus_session({ input }) {
+    const raw = clean(input);
+    const mins = Math.min(180, Math.max(1, Number(raw.match(/(\d+)\s*(?:min|minute)/i)?.[1] || raw.match(/^(\d+)/)?.[1] || 25)));
+    const topic = raw.replace(/\d+\s*(minutes?|mins?)?/i, '').replace(/^\s*(for|on|of)\s+/i, '').replace(/\b(focus|session|study)\b/gi, '').trim();
+    let opened = '';
+    if (topic && norm(topic) !== 'none') {
+      const hit = findFiles(topic, 1)[0];
+      if (hit) { await run('explorer.exe', [hit.full]); opened = ` I opened ${describe(hit).file}.`; }
+    }
+    await openUrl(FOCUS_MUSIC);
+    const label = topic && norm(topic) !== 'none' ? topic : 'your focus session';
+    setTimeout(async () => {
+      await psEnv(SPEAK, { JARVIS_TEXT: `Time is up. ${mins} minutes on ${label} done. Take a short break.` }, { detached: true });
+      await monitor.callOwner(`Hi, ARRC here. Your ${mins} minute focus session on ${label} is done. Great work. Take a five minute break, then tell me if you want another round.`, `focus session done: ${label}`);
+    }, mins * 60_000);
+    return `Focus session started: ${mins} minute${mins === 1 ? '' : 's'} on ${label}.${opened} Focus music is playing. I'll call you when the time is up.`;
+  },
+
+  // ----- deadlines (ARRC calls you before they are due) -----
+  async add_deadline({ input }) {
+    const r = monitor.add(input);
+    return r.error || r.text;
+  },
+  async list_deadlines() { return monitor.spokenList(); },
+  async finish_deadline({ input }) { return monitor.finish(input); },
 };
-const ALIASES = { open_site: 'open_website', website: 'open_website', search: 'web_search', youtube: 'play_youtube', play: 'play_youtube', app: 'open_app', note: 'take_note', notes: 'read_notes', status: 'system_status', battery: 'system_status', lock: 'lock_screen', media: 'media_control', volume: 'media_control', say: 'speak_on_laptop', speak: 'speak_on_laptop', screenshot: 'take_screenshot', timer: 'set_timer', email: 'draft_email', maps: 'directions', routine: 'run_routine', mode: 'run_routine' };
+const ALIASES = { open_site: 'open_website', website: 'open_website', search: 'web_search', youtube: 'play_youtube', play: 'play_youtube', app: 'open_app', note: 'take_note', notes: 'read_notes', status: 'system_status', battery: 'system_status', lock: 'lock_screen', media: 'media_control', volume: 'media_control', say: 'speak_on_laptop', speak: 'speak_on_laptop', screenshot: 'take_screenshot', timer: 'set_timer', email: 'draft_email', maps: 'directions', routine: 'run_routine', mode: 'run_routine', file: 'find_file', open_file: 'find_file', focus: 'focus_session', deadline: 'add_deadline', remind: 'add_deadline', deadlines: 'list_deadlines', submitted: 'finish_deadline', done: 'finish_deadline' };
 
 // ---------- auth ----------
 function authorise(req, body) {
@@ -274,6 +322,18 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(PAGE); }
   if (req.method === 'GET' && url.pathname === '/activity') return json(res, 200, activity);
   if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true });
+
+  // Console-only endpoints (this laptop's screen): deadlines and a test call. Never via the tunnel.
+  if (url.pathname.startsWith('/monitor')) {
+    if (viaTunnel) return json(res, 404, { result: 'Not found' });
+    if (req.method === 'GET') return json(res, 200, monitor.status());
+    let raw = ''; for await (const c of req) { raw += c; if (raw.length > 5000) break; }
+    let b = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+    if (url.pathname === '/monitor/add') { const r = monitor.add(`${b.title || ''} | ${b.when || ''}`); return json(res, r.error ? 400 : 200, { result: r.error || r.text }); }
+    if (url.pathname === '/monitor/done') return json(res, 200, { result: monitor.finish(b.id) });
+    if (url.pathname === '/monitor/test-call') return json(res, 200, await monitor.callOwner(b.message || 'Hi, ARRC here. This is a test of your urgent call. Everything is working.', 'test call'));
+    return json(res, 404, { result: 'Unknown endpoint' });
+  }
 
   const m = url.pathname.match(/^\/tools\/([a-z_]+)$/) || (url.pathname === '/action' ? [null, null] : null);
   if (!m) return json(res, 404, { result: 'Unknown endpoint' });
@@ -318,4 +378,8 @@ http.createServer(async (req, res) => {
     record({ action: name, input, result: `ERROR ${e.message}` });
     json(res, 500, { ok: false, result: 'Something went wrong on the laptop.' });
   }
-}).listen(PORT, () => console.log(`Jarvis action server on http://localhost:${PORT}  owner=${OWNER ? OWNER.slice(0, 4) + '…' : 'NOT SET'}  token=${TOKEN ? 'set' : 'MISSING'}`));
+}).listen(PORT, () => {
+  console.log(`ARRC action server on http://localhost:${PORT}  owner=${OWNER ? OWNER.slice(0, 4) + '…' : 'NOT SET'}  token=${TOKEN ? 'set' : 'MISSING'}  outbound=${monitor.status().configured ? 'ready' : 'dry-run'}`);
+  monitor.start();
+  setTimeout(() => buildIndex(true), 2000); // warm the file index so the first "find my file" is fast
+});
